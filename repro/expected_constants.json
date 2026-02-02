@@ -1,0 +1,124 @@
+{
+  "assume_sorted": {
+    "step_by_k": {
+      "16": {
+        "step_circuit_constraints": 122834,
+        "step_fcircuit_constraints": 26384
+      },
+      "32": {
+        "step_circuit_constraints": 306670,
+        "step_fcircuit_constraints": 42220
+      },
+      "64": {
+        "step_circuit_constraints": 880614,
+        "step_fcircuit_constraints": 73860
+      }
+    },
+    "nova_by_k_n": {
+      "16,32": {
+        "proof_size_bytes": 10785816
+      },
+      "16,64": {
+        "proof_size_bytes": 10785816
+      },
+      "16,128": {
+        "proof_size_bytes": 10785816
+      },
+      "16,256": {
+        "proof_size_bytes": 10785816
+      },
+      "32,32": {
+        "proof_size_bytes": 12808728
+      },
+      "32,64": {
+        "proof_size_bytes": 12808728
+      },
+      "32,128": {
+        "proof_size_bytes": 12808728
+      },
+      "32,256": {
+        "proof_size_bytes": 12808728
+      },
+      "64,32": {
+        "proof_size_bytes": 16850456
+      },
+      "64,64": {
+        "proof_size_bytes": 16850456
+      },
+      "64,128": {
+        "proof_size_bytes": 16850456
+      },
+      "64,256": {
+        "proof_size_bytes": 16850456
+      }
+    }
+  },
+  "prove_sorting": {
+    "step_by_k": {
+      "16": {
+        "step_circuit_constraints": 122834,
+        "step_fcircuit_constraints": 57937
+      },
+      "32": {
+        "step_circuit_constraints": 306670,
+        "step_fcircuit_constraints": 173453
+      },
+      "64": {
+        "step_circuit_constraints": 880614,
+        "step_fcircuit_constraints": 610821
+      }
+    },
+    "nova_by_k_n": {
+      "16,32": {
+        "proof_size_bytes": 14824536
+      },
+      "16,64": {
+        "proof_size_bytes": 14824536
+      },
+      "16,128": {
+        "proof_size_bytes": 14824536
+      },
+      "16,256": {
+        "proof_size_bytes": 14824536
+      },
+      "32,32": {
+        "proof_size_bytes": 29606488
+      },
+      "32,64": {
+        "proof_size_bytes": 29606488
+      },
+      "32,128": {
+        "proof_size_bytes": 29606488
+      },
+      "32,256": {
+        "proof_size_bytes": 29606488
+      },
+      "64,32": {
+        "proof_size_bytes": 85581400
+      },
+      "64,64": {
+        "proof_size_bytes": 85581400
+      },
+      "64,128": {
+        "proof_size_bytes": 85581400
+      },
+      "64,256": {
+        "proof_size_bytes": 85581400
+      }
+    }
+  },
+  "wrap_by_k": {
+    "16": {
+      "calldata_bytes": 1412,
+      "wrapped_proof_bin": 384
+    },
+    "32": {
+      "calldata_bytes": 1412,
+      "wrapped_proof_bin": 384
+    },
+    "64": {
+      "calldata_bytes": 1412,
+      "wrapped_proof_bin": 384
+    }
+  }
+}

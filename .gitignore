@@ -1,0 +1,87 @@
+# --------------------------------------------------------------------------------------
+# Public-facing repo hygiene
+#
+# Keep the repo reproducible while preventing:
+# - local build outputs
+# - large evaluation artifacts (proofs, caches, receipts)
+# - secrets (env files, keys)
+# --------------------------------------------------------------------------------------
+
+# Rust
+target/
+target_*/
+target_eval_release/
+**/*.rs.bk
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# LaTeX build outputs (keep sources + figures, ignore intermediates)
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.out
+*.log
+*.spl
+
+# Evaluation outputs: keep scripts + small CSV/JSON summaries; ignore heavy artifacts/caches
+eval/cache/**
+eval/artifacts/**
+!eval/artifacts/README.md
+eval/archive/**
+!eval/archive/README.md
+eval/plots/**
+eval/wrapped_proofs/**
+eval/*.csv
+eval/*.json
+
+# Proof artifacts / contracts generated during evaluation
+*.bin
+*.calldata
+
+# Secrets / credentials (do NOT commit)
+.env
+.env.*
+*.env
+!*.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+**/*private_key*
+**/*mnemonic*
+
+# Foundry / Node (only if used locally)
+node_modules/
+out/
+cache/
+
+# Private workspace (keep notes/keys here; never commit)
+private/
+
+# Other local scratch
+*.tmp
+capture_output.py
+debug_wsl.sh
+simple_run.sh
+sitecustomize.py
