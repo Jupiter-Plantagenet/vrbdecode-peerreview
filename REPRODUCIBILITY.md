@@ -3,7 +3,7 @@
 This repo contains:
 - a normative decoding/receipt specification (`spec/`)
 - a Rust reference + circuit implementation (`vrbdecode-core/`, `vrbdecode-zk/`)
-- evaluation runners that reproduce the ICT Express results (`eval/`, `scripts/`)
+- evaluation runners that reproduce the Journal submission results (`eval/`, `scripts/`)
 
 The evaluation is CPU-intensive; this guide provides both a quick sanity run and a paper-grade (long) run.
 
@@ -31,7 +31,7 @@ This runs:
 - Python reference + vector tests
 - Rust unit tests
 
-## 3) Reproduce ICT Express results (one command)
+## 3) Reproduce Journal Submission results (one command)
 
 ### 3.1 Quick run (reduced Ks/Ns, 1 repetition)
 
