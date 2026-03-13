@@ -1372,7 +1372,8 @@ impl<const K: usize, const PROVE_SORTING: bool> StepFCircuit<K, PROVE_SORTING> {
 
         // Generate native witness values for constraint verification
         // (This mirrors the native computation to get intermediate values)
-        let _top_k_native = top_k.value().unwrap_or(1);
+        let top_k_native = top_k.value().unwrap_or(1) as usize;
+        let top_p_q16_native = top_p_q16.value().unwrap_or(0x0001_0000u32);
         let t_clamped_native = t_q16.value().unwrap_or(1).max(1);
 
         let token_id_native: Vec<u32> = (0..K)
@@ -1428,8 +1429,7 @@ impl<const K: usize, const PROVE_SORTING: bool> StepFCircuit<K, PROVE_SORTING> {
         }
         record("scaled_logits");
 
-        let (sorted_token_id, sorted_slog, sorted_logit_q16) = if PROVE_SORTING {
-            // Prove sorting inside the circuit: accept arbitrary order then apply a selection-permutation.
+        let perm_native: Vec<usize> = if PROVE_SORTING {
             let mut perm: Vec<usize> = (0..K).collect();
             perm.sort_by(|&a, &b| {
                 let la = slog_native[a];
@@ -1439,10 +1439,20 @@ impl<const K: usize, const PROVE_SORTING: bool> StepFCircuit<K, PROVE_SORTING> {
                 }
                 token_id_native[a].cmp(&token_id_native[b])
             });
+            perm
+        } else {
+            (0..K).collect()
+        };
 
+        let _sorted_token_id_native: Vec<u32> = perm_native.iter().map(|&idx| token_id_native[idx]).collect();
+        let sorted_slog_native: Vec<i64> = perm_native.iter().map(|&idx| slog_native[idx]).collect();
+        let _sorted_logit_q16_native: Vec<i32> = perm_native.iter().map(|&idx| logit_q16_native[idx]).collect();
+
+        let (sorted_token_id, sorted_slog, sorted_logit_q16) = if PROVE_SORTING {
+            // Prove sorting inside the circuit: accept arbitrary order then apply a selection-permutation.
             let log_k = (K as u64).trailing_zeros() as usize;
             let mut idx_bits_le: Vec<Vec<Boolean<Fr>>> = Vec::with_capacity(K);
-            for &idx in &perm {
+            for &idx in &perm_native {
                 let mut bits = Vec::with_capacity(log_k);
                 for b in 0..log_k {
                     let bit = ((idx >> b) & 1) == 1;
@@ -1511,6 +1521,426 @@ impl<const K: usize, const PROVE_SORTING: bool> StepFCircuit<K, PROVE_SORTING> {
             bad.enforce_equal(&Boolean::FALSE)?;
         }
         record("sort_order");
+
+        let mut w_native: Vec<u64> = vec![0u64; K];
+        let mut z_clip_native: Vec<i64> = vec![0i64; K];
+        let mut neg_z_native: Vec<u64> = vec![0u64; K];
+        let mut n_native: Vec<u32> = vec![0u32; K];
+        let mut rem16_native: Vec<u32> = vec![0u32; K];
+        let mut r_q16_native: Vec<i64> = vec![0i64; K];
+        let mut r_q30_native: Vec<i64> = vec![0i64; K];
+        let mut r2_native: Vec<i64> = vec![0i64; K];
+        let mut r3_native: Vec<i64> = vec![0i64; K];
+        let mut r4_native: Vec<i64> = vec![0i64; K];
+        let mut r5_native: Vec<i64> = vec![0i64; K];
+        let mut r2_rem30_native: Vec<u32> = vec![0u32; K];
+        let mut r3_rem30_native: Vec<u32> = vec![0u32; K];
+        let mut r4_rem30_native: Vec<u32> = vec![0u32; K];
+        let mut r5_rem30_native: Vec<u32> = vec![0u32; K];
+        let mut r2_div2_native: Vec<i64> = vec![0i64; K];
+        let mut r2_div2_rem_native: Vec<u32> = vec![0u32; K];
+        let mut r3_div6_native: Vec<i64> = vec![0i64; K];
+        let mut r3_div6_rem_native: Vec<u32> = vec![0u32; K];
+        let mut r4_div24_native: Vec<i64> = vec![0i64; K];
+        let mut r4_div24_rem_native: Vec<u32> = vec![0u32; K];
+        let mut r5_div120_native: Vec<i64> = vec![0i64; K];
+        let mut r5_div120_rem_native: Vec<u32> = vec![0u32; K];
+        let mut p_raw_native: Vec<i64> = vec![0i64; K];
+        let mut p_clamped_native: Vec<u64> = vec![0u64; K];
+        let mut w_rem30_native: Vec<u32> = vec![0u32; K];
+
+        if top_k_native > 0 {
+            let m = sorted_slog_native[0];
+            for j in 0..top_k_native.min(K) {
+                let mut z = sorted_slog_native[j] - m;
+                if z < Z_MIN_Q16 {
+                    z = Z_MIN_Q16;
+                }
+                z_clip_native[j] = z;
+
+                let neg_z = -z;
+                neg_z_native[j] = neg_z as u64;
+
+                let mut n = (neg_z >> 16) as i64;
+                if n < 0 {
+                    n = 0;
+                }
+                if n > 12 {
+                    n = 12;
+                }
+                n_native[j] = n as u32;
+                rem16_native[j] = (neg_z as u32) & 0xFFFF;
+
+                let r_q16 = z + (n << 16);
+                r_q16_native[j] = r_q16;
+
+                let r_q30: i64 = r_q16 << 14;
+                r_q30_native[j] = r_q30;
+                let (r2, r2_rem30) = mul_shift30_i64(r_q30, r_q30);
+                r2_native[j] = r2;
+                r2_rem30_native[j] = r2_rem30;
+                let (r3, r3_rem30) = mul_shift30_i64(r2, r_q30);
+                r3_native[j] = r3;
+                r3_rem30_native[j] = r3_rem30;
+                let (r4, r4_rem30) = mul_shift30_i64(r3, r_q30);
+                r4_native[j] = r4;
+                r4_rem30_native[j] = r4_rem30;
+                let (r5, r5_rem30) = mul_shift30_i64(r4, r_q30);
+                r5_native[j] = r5;
+                r5_rem30_native[j] = r5_rem30;
+
+                let (r2_div2, r2_div2_rem) = div_euclid_i64(r2, 2);
+                r2_div2_native[j] = r2_div2;
+                r2_div2_rem_native[j] = r2_div2_rem;
+                let (r3_div6, r3_div6_rem) = div_euclid_i64(r3, 6);
+                r3_div6_native[j] = r3_div6;
+                r3_div6_rem_native[j] = r3_div6_rem;
+                let (r4_div24, r4_div24_rem) = div_euclid_i64(r4, 24);
+                r4_div24_native[j] = r4_div24;
+                r4_div24_rem_native[j] = r4_div24_rem;
+                let (r5_div120, r5_div120_rem) = div_euclid_i64(r5, 120);
+                r5_div120_native[j] = r5_div120;
+                r5_div120_rem_native[j] = r5_div120_rem;
+
+                let p_raw = Q30 as i64
+                    + r_q30
+                    + r2_div2
+                    + r3_div6
+                    + r4_div24
+                    + r5_div120;
+                p_raw_native[j] = p_raw;
+
+                let p = exp_poly5_q16_16_to_q30(r_q16);
+                p_clamped_native[j] = p;
+                let prod_w: u128 = (E_Q30[n as usize] as u128) * (p as u128);
+                w_native[j] = (prod_w >> 30) as u64;
+                w_rem30_native[j] = (prod_w & ((1u128 << 30) - 1)) as u32;
+            }
+        }
+
+        let mut prefix_native: Vec<u64> = vec![0u64; K];
+        let mut acc: u64 = 0;
+        for j in 0..K {
+            acc = acc.wrapping_add(w_native[j]);
+            prefix_native[j] = acc;
+        }
+        let wk_native = acc;
+        let prod_th_native = (top_p_q16_native as u128) * (wk_native as u128);
+        let th_native = (prod_th_native >> 16) as u64;
+        let th_rem_native = (prod_th_native & 0xFFFF) as u32;
+
+        let w: Vec<UInt64<Fr>> = (0..K)
+            .map(|j| UInt64::new_variable(cs.clone(), || Ok(w_native[j]), AllocationMode::Witness))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let z_min_u64 = UInt64::constant(Z_MIN_Q16 as u64);
+        let zero_i64 = UInt64::constant(0u64);
+        let minus_one_q16 = UInt64::constant((-((1i64) << 16)) as u64);
+        let m_slog = sorted_slog[0].clone();
+        let m_fp = signed_fp_from_u64(&m_slog)?;
+
+        for j in 0..K {
+            let j_lt_topk = uint32_is_ge(&top_k, &UInt32::constant((j as u32) + 1u32))?;
+            let gate_fp: FpVar<Fr> = j_lt_topk.clone().into();
+
+            let z = UInt64::new_variable(
+                cs.clone(),
+                || Ok((sorted_slog_native[j] - sorted_slog_native[0]) as u64),
+                AllocationMode::Witness,
+            )?;
+            let z_clip = UInt64::new_variable(cs.clone(), || Ok(z_clip_native[j] as u64), AllocationMode::Witness)?;
+            let neg_z = UInt64::new_variable(cs.clone(), || Ok(neg_z_native[j]), AllocationMode::Witness)?;
+            let n = UInt32::new_variable(cs.clone(), || Ok(n_native[j]), AllocationMode::Witness)?;
+            let rem16 = UInt32::new_variable(cs.clone(), || Ok(rem16_native[j]), AllocationMode::Witness)?;
+            let r_q16 = UInt64::new_variable(cs.clone(), || Ok(r_q16_native[j] as u64), AllocationMode::Witness)?;
+
+            let slog_j_fp = signed_fp_from_u64(&sorted_slog[j])?;
+            let z_fp = signed_fp_from_u64(&z)?;
+            (z_fp - (slog_j_fp - m_fp.clone())).mul_equals(&gate_fp, &FpVar::Constant(Fr::from(0u64)))?;
+
+            let ge_zmin = int64_is_ge(&z, &z_min_u64)?;
+            let z_clip_sel = UInt64::conditionally_select(&ge_zmin, &z, &z_min_u64)?;
+            let z_clip_diff = signed_fp_from_u64(&z_clip)? - signed_fp_from_u64(&z_clip_sel)?;
+            z_clip_diff.mul_equals(&gate_fp, &FpVar::Constant(Fr::from(0u64)))?;
+
+            let le_zero = int64_is_ge(&zero_i64, &z_clip)?;
+            let le_zero_fp: FpVar<Fr> = le_zero.into();
+            (le_zero_fp - FpVar::Constant(Fr::from(1u64))).mul_equals(&gate_fp, &FpVar::Constant(Fr::from(0u64)))?;
+
+            let neg_z_fp = signed_fp_from_u64(&neg_z)?;
+            let zc_fp = signed_fp_from_u64(&z_clip)?;
+            (neg_z_fp + zc_fp).mul_equals(&gate_fp, &FpVar::Constant(Fr::from(0u64)))?;
+            let neg_z_bits = neg_z.to_bits_le()?;
+            neg_z_bits[63].enforce_equal(&Boolean::FALSE)?;
+
+            let rem16_bits = rem16.to_bits_le()?;
+            for bit in 16..32 {
+                rem16_bits[bit].enforce_equal(&Boolean::FALSE)?;
+            }
+
+            uint32_is_ge(&UInt32::constant(12u32), &n)?.enforce_equal(&Boolean::TRUE)?;
+
+            let neg_z_u = fp_from_uint64_le(&neg_z)?;
+            let n_fp = fp_from_uint32_le(&n)?;
+            let rem16_fp = fp_from_uint32_le(&rem16)?;
+            let two_pow_16_fp = FpVar::Constant(Fr::from(1u64 << 16));
+            (neg_z_u - (n_fp.clone() * two_pow_16_fp.clone() + rem16_fp))
+                .mul_equals(&gate_fp, &FpVar::Constant(Fr::from(0u64)))?;
+
+            let r_q16_fp = signed_fp_from_u64(&r_q16)?;
+            let zc_fp2 = signed_fp_from_u64(&z_clip)?;
+            let n_shift_fp = n_fp * two_pow_16_fp;
+            (r_q16_fp.clone() - (zc_fp2 + n_shift_fp))
+                .mul_equals(&gate_fp, &FpVar::Constant(Fr::from(0u64)))?;
+
+            int64_is_ge(&r_q16, &minus_one_q16)?.enforce_equal(&Boolean::TRUE)?;
+            int64_is_ge(&zero_i64, &r_q16)?.enforce_equal(&Boolean::TRUE)?;
+
+            let r_q30 = UInt64::new_variable(cs.clone(), || Ok(r_q30_native[j] as u64), AllocationMode::Witness)?;
+            let r2 = UInt64::new_variable(cs.clone(), || Ok(r2_native[j] as u64), AllocationMode::Witness)?;
+            let r3 = UInt64::new_variable(cs.clone(), || Ok(r3_native[j] as u64), AllocationMode::Witness)?;
+            let r4 = UInt64::new_variable(cs.clone(), || Ok(r4_native[j] as u64), AllocationMode::Witness)?;
+            let r5 = UInt64::new_variable(cs.clone(), || Ok(r5_native[j] as u64), AllocationMode::Witness)?;
+
+            let r2_rem30 = UInt32::new_variable(cs.clone(), || Ok(r2_rem30_native[j]), AllocationMode::Witness)?;
+            let r3_rem30 = UInt32::new_variable(cs.clone(), || Ok(r3_rem30_native[j]), AllocationMode::Witness)?;
+            let r4_rem30 = UInt32::new_variable(cs.clone(), || Ok(r4_rem30_native[j]), AllocationMode::Witness)?;
+            let r5_rem30 = UInt32::new_variable(cs.clone(), || Ok(r5_rem30_native[j]), AllocationMode::Witness)?;
+
+            let r2_div2 = UInt64::new_variable(cs.clone(), || Ok(r2_div2_native[j] as u64), AllocationMode::Witness)?;
+            let r2_div2_rem =
+                UInt32::new_variable(cs.clone(), || Ok(r2_div2_rem_native[j]), AllocationMode::Witness)?;
+            let r3_div6 = UInt64::new_variable(cs.clone(), || Ok(r3_div6_native[j] as u64), AllocationMode::Witness)?;
+            let r3_div6_rem =
+                UInt32::new_variable(cs.clone(), || Ok(r3_div6_rem_native[j]), AllocationMode::Witness)?;
+            let r4_div24 = UInt64::new_variable(cs.clone(), || Ok(r4_div24_native[j] as u64), AllocationMode::Witness)?;
+            let r4_div24_rem =
+                UInt32::new_variable(cs.clone(), || Ok(r4_div24_rem_native[j]), AllocationMode::Witness)?;
+            let r5_div120 =
+                UInt64::new_variable(cs.clone(), || Ok(r5_div120_native[j] as u64), AllocationMode::Witness)?;
+            let r5_div120_rem =
+                UInt32::new_variable(cs.clone(), || Ok(r5_div120_rem_native[j]), AllocationMode::Witness)?;
+            let p_raw = UInt64::new_variable(cs.clone(), || Ok(p_raw_native[j] as u64), AllocationMode::Witness)?;
+            let p_clamped =
+                UInt64::new_variable(cs.clone(), || Ok(p_clamped_native[j]), AllocationMode::Witness)?;
+            let w_rem30 = UInt32::new_variable(cs.clone(), || Ok(w_rem30_native[j]), AllocationMode::Witness)?;
+
+            let r_q30_fp = signed_fp_from_u64(&r_q30)?;
+            let two_pow_14_fp = FpVar::Constant(Fr::from(1u64 << 14));
+            (r_q30_fp.clone() - (r_q16_fp * two_pow_14_fp))
+                .mul_equals(&gate_fp, &FpVar::Constant(Fr::from(0u64)))?;
+
+            let rem30s = [&r2_rem30, &r3_rem30, &r4_rem30, &r5_rem30, &w_rem30];
+            for rem in rem30s {
+                let rem_bits = rem.to_bits_le()?;
+                for bit in 30..32 {
+                    rem_bits[bit].enforce_equal(&Boolean::FALSE)?;
+                }
+            }
+
+            let two_pow_30_fp = FpVar::Constant(Fr::from(1u64 << 30));
+            let r2_fp = signed_fp_from_u64(&r2)?;
+            let r3_fp = signed_fp_from_u64(&r3)?;
+            let r4_fp = signed_fp_from_u64(&r4)?;
+            let r5_fp = signed_fp_from_u64(&r5)?;
+
+            let r2_rem_fp = fp_from_uint32_le(&r2_rem30)?;
+            let r3_rem_fp = fp_from_uint32_le(&r3_rem30)?;
+            let r4_rem_fp = fp_from_uint32_le(&r4_rem30)?;
+            let r5_rem_fp = fp_from_uint32_le(&r5_rem30)?;
+
+            let prod_r2 = r_q30_fp.clone() * r_q30_fp.clone();
+            let r2_decomp = r2_fp.clone() * two_pow_30_fp.clone() + r2_rem_fp;
+            (prod_r2 - r2_decomp).mul_equals(&gate_fp, &FpVar::Constant(Fr::from(0u64)))?;
+
+            let prod_r3 = r2_fp.clone() * r_q30_fp.clone();
+            let r3_decomp = r3_fp.clone() * two_pow_30_fp.clone() + r3_rem_fp;
+            (prod_r3 - r3_decomp).mul_equals(&gate_fp, &FpVar::Constant(Fr::from(0u64)))?;
+
+            let prod_r4 = r3_fp.clone() * r_q30_fp.clone();
+            let r4_decomp = r4_fp.clone() * two_pow_30_fp.clone() + r4_rem_fp;
+            (prod_r4 - r4_decomp).mul_equals(&gate_fp, &FpVar::Constant(Fr::from(0u64)))?;
+
+            let prod_r5 = r4_fp.clone() * r_q30_fp.clone();
+            let r5_decomp = r5_fp.clone() * two_pow_30_fp.clone() + r5_rem_fp;
+            (prod_r5 - r5_decomp).mul_equals(&gate_fp, &FpVar::Constant(Fr::from(0u64)))?;
+
+            let d2 = FpVar::Constant(Fr::from(2u64));
+            let d6 = FpVar::Constant(Fr::from(6u64));
+            let d24 = FpVar::Constant(Fr::from(24u64));
+            let d120 = FpVar::Constant(Fr::from(120u64));
+
+            uint32_is_ge(&r2_div2_rem, &UInt32::constant(2u32))?.enforce_equal(&Boolean::FALSE)?;
+            uint32_is_ge(&r3_div6_rem, &UInt32::constant(6u32))?.enforce_equal(&Boolean::FALSE)?;
+            uint32_is_ge(&r4_div24_rem, &UInt32::constant(24u32))?.enforce_equal(&Boolean::FALSE)?;
+            uint32_is_ge(&r5_div120_rem, &UInt32::constant(120u32))?.enforce_equal(&Boolean::FALSE)?;
+
+            let r2_div2_rem_bits = r2_div2_rem.to_bits_le()?;
+            let r3_div6_rem_bits = r3_div6_rem.to_bits_le()?;
+            let r4_div24_rem_bits = r4_div24_rem.to_bits_le()?;
+            let r5_div120_rem_bits = r5_div120_rem.to_bits_le()?;
+            for bit in 7..32 {
+                r3_div6_rem_bits[bit].enforce_equal(&Boolean::FALSE)?;
+                r4_div24_rem_bits[bit].enforce_equal(&Boolean::FALSE)?;
+                r5_div120_rem_bits[bit].enforce_equal(&Boolean::FALSE)?;
+            }
+            for bit in 1..32 {
+                r2_div2_rem_bits[bit].enforce_equal(&Boolean::FALSE)?;
+            }
+
+            let r2_div2_fp = signed_fp_from_u64(&r2_div2)?;
+            let r2_div2_rem_fp = fp_from_uint32_le(&r2_div2_rem)?;
+            (r2_fp - (r2_div2_fp.clone() * d2 + r2_div2_rem_fp))
+                .mul_equals(&gate_fp, &FpVar::Constant(Fr::from(0u64)))?;
+
+            let r3_div6_fp = signed_fp_from_u64(&r3_div6)?;
+            let r3_div6_rem_fp = fp_from_uint32_le(&r3_div6_rem)?;
+            (r3_fp - (r3_div6_fp.clone() * d6 + r3_div6_rem_fp))
+                .mul_equals(&gate_fp, &FpVar::Constant(Fr::from(0u64)))?;
+
+            let r4_div24_fp = signed_fp_from_u64(&r4_div24)?;
+            let r4_div24_rem_fp = fp_from_uint32_le(&r4_div24_rem)?;
+            (r4_fp - (r4_div24_fp.clone() * d24 + r4_div24_rem_fp))
+                .mul_equals(&gate_fp, &FpVar::Constant(Fr::from(0u64)))?;
+
+            let r5_div120_fp = signed_fp_from_u64(&r5_div120)?;
+            let r5_div120_rem_fp = fp_from_uint32_le(&r5_div120_rem)?;
+            (r5_fp - (r5_div120_fp.clone() * d120 + r5_div120_rem_fp))
+                .mul_equals(&gate_fp, &FpVar::Constant(Fr::from(0u64)))?;
+
+            let p_raw_fp = signed_fp_from_u64(&p_raw)?;
+            let q30_fp = FpVar::Constant(Fr::from(Q30));
+            let p_expr = q30_fp
+                + r_q30_fp.clone()
+                + r2_div2_fp.clone()
+                + r3_div6_fp.clone()
+                + r4_div24_fp.clone()
+                + r5_div120_fp.clone();
+            (p_raw_fp - p_expr).mul_equals(&gate_fp, &FpVar::Constant(Fr::from(0u64)))?;
+
+            uint64_is_ge(&UInt64::constant(Q30), &p_clamped)?.enforce_equal(&Boolean::TRUE)?;
+            let p_le_zero = int64_is_ge(&zero_i64, &p_raw)?;
+            let p_ge_q30 = int64_is_ge(&p_raw, &UInt64::constant(Q30))?;
+            let p_nonneg = UInt64::conditionally_select(&p_le_zero, &UInt64::constant(0u64), &p_raw)?;
+            let p_sel = UInt64::conditionally_select(&p_ge_q30, &UInt64::constant(Q30), &p_nonneg)?;
+            let p_clamped_fp = fp_from_uint64_le(&p_clamped)?;
+            let p_sel_fp = fp_from_uint64_le(&p_sel)?;
+            (p_clamped_fp - p_sel_fp).mul_equals(&gate_fp, &FpVar::Constant(Fr::from(0u64)))?;
+
+            let n_bits = n.to_bits_le()?;
+            let n_bits_be = vec![n_bits[3].clone(), n_bits[2].clone(), n_bits[1].clone(), n_bits[0].clone()];
+            let mut e_table: Vec<UInt64<Fr>> = Vec::with_capacity(16);
+            for idx in 0..16 {
+                let v = if idx < 13 { E_Q30[idx] } else { 0u64 };
+                e_table.push(UInt64::constant(v));
+            }
+            let e_n = UInt64::conditionally_select_power_of_two_vector(&n_bits_be, &e_table)?;
+            let e_fp = fp_from_uint64_le(&e_n)?;
+            let p_fp = fp_from_uint64_le(&p_clamped)?;
+            let prod_w_fp = e_fp * p_fp;
+            let w_fp = fp_from_uint64_le(&w[j])?;
+            let w_rem_fp = fp_from_uint32_le(&w_rem30)?;
+            let w_decomp = w_fp * two_pow_30_fp + w_rem_fp;
+            (prod_w_fp - w_decomp).mul_equals(&gate_fp, &FpVar::Constant(Fr::from(0u64)))?;
+        }
+
+        for j in 0..K {
+            uint64_is_ge(&UInt64::constant(Q30), &w[j])?.enforce_equal(&Boolean::TRUE)?;
+            let j_lt_topk = uint32_is_ge(&top_k, &UInt32::constant((j as u32) + 1u32))?;
+            let w_allowed = UInt64::conditionally_select(&j_lt_topk, &w[j], &UInt64::constant(0u64))?;
+            w[j].enforce_equal(&w_allowed)?;
+        }
+        record("weights");
+
+        let prefix: Vec<UInt64<Fr>> = (0..K)
+            .map(|j| UInt64::new_variable(cs.clone(), || Ok(prefix_native[j]), AllocationMode::Witness))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let w0_fp = fp_from_uint64_le(&w[0])?;
+        let p0_fp = fp_from_uint64_le(&prefix[0])?;
+        p0_fp.enforce_equal(&w0_fp)?;
+        for j in 1..K {
+            let pj_fp = fp_from_uint64_le(&prefix[j])?;
+            let pjm1_fp = fp_from_uint64_le(&prefix[j - 1])?;
+            let wj_fp = fp_from_uint64_le(&w[j])?;
+            pj_fp.enforce_equal(&(pjm1_fp + wj_fp))?;
+            uint64_is_ge(&prefix[j], &prefix[j - 1])?.enforce_equal(&Boolean::TRUE)?;
+        }
+
+        let wk_fp = fp_from_uint64_le(&prefix[K - 1])?;
+        let top_p_fp = fp_from_uint32_le(&top_p_q16)?;
+        let th = UInt64::new_variable(cs.clone(), || Ok(th_native), AllocationMode::Witness)?;
+        let th_rem = UInt32::new_variable(cs.clone(), || Ok(th_rem_native), AllocationMode::Witness)?;
+
+        let th_rem_bits = th_rem.to_bits_le()?;
+        for bit in 16..32 {
+            th_rem_bits[bit].enforce_equal(&Boolean::FALSE)?;
+        }
+
+        let th_fp = fp_from_uint64_le(&th)?;
+        let th_rem_fp = fp_from_uint32_le(&th_rem)?;
+        let prod_th_fp = top_p_fp * wk_fp;
+        let two_pow_16 = FpVar::Constant(Fr::from(1u64 << 16));
+        prod_th_fp.enforce_equal(&(th_fp * two_pow_16 + th_rem_fp))?;
+
+        let prefix_ge_th: Vec<Boolean<Fr>> = (0..K)
+            .map(|j| uint64_is_ge(&prefix[j], &th))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut stop: Vec<Boolean<Fr>> = Vec::with_capacity(K);
+        stop.push(prefix_ge_th[0].clone());
+        for j in 1..K {
+            let not_prev = !prefix_ge_th[j - 1].clone();
+            stop.push(&prefix_ge_th[j] & &not_prev);
+        }
+        let mut stop_sum = FpVar::Constant(Fr::from(0u64));
+        for j in 0..K {
+            let bit_fp: FpVar<Fr> = stop[j].clone().into();
+            stop_sum += bit_fp;
+        }
+        stop_sum.enforce_equal(&FpVar::Constant(Fr::from(1u64)))?;
+
+        let mut ws_calc = FpVar::Constant(Fr::from(0u64));
+        for j in 0..K {
+            let stop_fp: FpVar<Fr> = stop[j].clone().into();
+            let pj_fp = fp_from_uint64_le(&prefix[j])?;
+            ws_calc += pj_fp * stop_fp;
+        }
+        fp_from_uint64_le(ws)?.enforce_equal(&ws_calc)?;
+        ws.is_eq(&UInt64::constant(0u64))?.enforce_equal(&Boolean::FALSE)?;
+
+        let prefix_gt_r: Vec<Boolean<Fr>> = (0..K)
+            .map(|j| {
+                let ge = uint64_is_ge(&prefix[j], r)?;
+                let eq = prefix[j].is_eq(r)?;
+                let not_eq = !eq;
+                Ok(&ge & &not_eq)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut choose: Vec<Boolean<Fr>> = Vec::with_capacity(K);
+        choose.push(prefix_gt_r[0].clone());
+        for j in 1..K {
+            let not_prev = !prefix_gt_r[j - 1].clone();
+            choose.push(&prefix_gt_r[j] & &not_prev);
+        }
+        for j in 1..K {
+            let prev_ge_th = prefix_ge_th[j - 1].clone();
+            (&choose[j] & &prev_ge_th).enforce_equal(&Boolean::FALSE)?;
+        }
+        let mut choose_sum = FpVar::Constant(Fr::from(0u64));
+        for j in 0..K {
+            let bit_fp: FpVar<Fr> = choose[j].clone().into();
+            choose_sum += bit_fp;
+        }
+        choose_sum.enforce_equal(&FpVar::Constant(Fr::from(1u64)))?;
+
+        let mut y_calc = sorted_token_id[0].clone();
+        for j in 1..K {
+            y_calc = UInt32::conditionally_select(&choose[j], &sorted_token_id[j], &y_calc)?;
+        }
+        y_calc.enforce_equal(y)?;
+        record("sampling");
 
         // Compute candidate hash
         let mut cand_sponge = PoseidonSpongeVar::<Fr>::new(cs.clone(), &self.poseidon_config);

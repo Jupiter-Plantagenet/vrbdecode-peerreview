@@ -26,7 +26,7 @@ Constants:
 - `T_MIN = 1` in Q16.16 (i.e., 1/65536). Any `T < T_MIN` MUST be clamped to `T_MIN`.
 
 ### 1.3 Rounding (MUST)
-- When dividing signed fixed-point values, implementations MUST use **floor toward -∞**.
+- When dividing signed fixed-point values, implementations MUST use **floor toward negative infinity**.
 - When dividing unsigned values, implementations MUST use **floor**.
 - When multiplying fixed-point values and downshifting, implementations MUST use **floor** (truncate low bits).
 
@@ -73,7 +73,7 @@ Sort candidates by `(scaled_logit DESC, token_id ASC)` producing arrays:
 Let `k = top_k`. Only indices `i in [0..k-1]` are eligible going forward.
 
 ### 3.4 Compute unnormalized exp-weights over top-k
-We compute weights `w[i] ≈ exp( slogit[i] - m )`, where `m = max_{i<k} slogit[i]` (note `m = slogit[0]` after sorting).
+We compute weights `w[i]` approximating `exp( slogit[i] - m )`, where `m = max_{i<k} slogit[i]` (note `m = slogit[0]` after sorting).
 
 Let `z[i] = slogit[i] - m` in Q16.16. Since `z[i] <= 0`, clip:
 - `z[i] = max(z[i], Z_MIN)` where `Z_MIN = -12.0` in Q16.16 (i.e., `-12 << 16`)
@@ -81,7 +81,7 @@ Let `z[i] = slogit[i] - m` in Q16.16. Since `z[i] <= 0`, clip:
 Then compute `w[i]` in Q30 using:
 - Decompose `z[i]` into integer part `n` and remainder `r` such that:
   - `n = clamp( floor(-z[i]) in Q16.16 to integer, 0..12 )`
-  - `r = z[i] + (n << 16)` so `r ∈ [-1.0, 0]` in Q16.16
+  - `r = z[i] + (n << 16)` so `r` is in `[-1.0, 0]` in Q16.16
 
 Precomputed constants (MUST):
 Let `E[n] = round(exp(-n) * 2^30)` for n=0..12:
@@ -92,7 +92,7 @@ E = [
   48748, 17933, 6597
 ]
 ```
-Compute polynomial approximation `P(r)` for `exp(r)` on r ∈ [-1, 0] using Q16.16 input and Q30 output:
+Compute polynomial approximation `P(r)` for `exp(r)` on `r in [-1, 0]` using Q16.16 input and Q30 output:
 ```
 P(r) = 1 + r + r^2/2 + r^3/6 + r^4/24 + r^5/120
 ```

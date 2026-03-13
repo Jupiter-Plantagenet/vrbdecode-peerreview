@@ -14,7 +14,7 @@ All non-field data MUST be encoded deterministically into field elements.
 - `bytes32` values are split into two 128-bit limbs and mapped into two field elements.
 - `u32` is embedded directly into a field element.
 - `u64` is embedded directly into a field element.
-- `i32` values used as inputs to candidate digests MUST be embedded as `u32` using two’s complement bit representation (i.e., bitcast).
+- `i32` values used as inputs to candidate digests MUST be embedded as `u32` using two's complement bit representation (i.e., bitcast).
 
 Domain separators
 - Domain separator ASCII bytes are absorbed as individual field elements `Fr(b)` for each byte `b`.
@@ -78,7 +78,7 @@ cand_hash_t = Poseidon(
 Where:
 - The candidates are deterministically sorted by `(scaled_logit DESC, token_id ASC)` as defined in `spec/DecodingSpec_v1.md`.
 - `token_id_sorted[i]` is a `u32` embedded as a field element.
-- `logit_q16_sorted[i]` is the original `i32` Q16.16 logit embedded as `u32` (two’s complement bitcast) and then embedded as a field element.
+- `logit_q16_sorted[i]` is the original `i32` Q16.16 logit embedded as `u32` (two's complement bitcast) and then embedded as a field element.
 
 Implementation note (non-normative):
 - Implementations MAY either (i) require that the candidate shortlist is provided already in this canonical order and only prove sortedness, or (ii) accept candidates in arbitrary order and additionally prove a canonicalization permutation inside the circuit. Both approaches compute the same `cand_hash_t` over the canonical order.

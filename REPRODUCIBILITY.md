@@ -1,64 +1,87 @@
-# Reproducibility (Peer Review)
+# Reproducibility
 
-This repo contains:
-- a normative decoding/receipt specification (`spec/`)
-- a Rust reference + circuit implementation (`vrbdecode-core/`, `vrbdecode-zk/`)
-- evaluation runners that reproduce the Journal submission results (`eval/`, `scripts/`)
+Before running the artifact, reviewers should read `REVIEWER_NOTE.md`. This branch includes a correction that aligns `StepFCircuit` with the manuscript semantics.
 
-The evaluation is CPU-intensive; this guide provides both a quick sanity run and a paper-grade (long) run.
+This repository is organized so that a reviewer can do one of three things:
 
-## 1) Environment
+- inspect the locked specifications in `spec/`
+- run a quick correctness and sanity pass
+- reproduce the benchmark and artifact-generation workflows used for the submission
 
-Supported: Linux/macOS (Windows via WSL recommended).
+The heavier evaluation runs are CPU-intensive, so the commands below are ordered from fastest to slowest.
 
-Required:
-- Rust toolchain via `rustup` (locked by `rust-toolchain.toml`)
-- Python 3.10+ (stdlib-only for runners; plotting needs matplotlib)
+## 1. Environment
 
-If you want to generate figures:
+Recommended platforms:
+
+- Linux
+- macOS
+- Windows via WSL
+
+Required tools:
+
+- Rust via `rustup` using the version pinned in `rust-toolchain.toml`
+- Python 3.10+
+
+Optional tools:
+
+- `matplotlib` for figure generation
+- Foundry (`anvil`, `forge`, `cast`) for local EVM verification
+
+To install plotting support:
+
 - `python3 -m pip install 'matplotlib>=3.8'`
 
-Optional:
-- Foundry (`anvil/forge/cast`) if you want to reproduce on-chain verification experiments.
+## 2. Quick sanity check
 
-## 2) Quick sanity check (minutes)
-
-From repo root:
+From the repository root, run:
 
 - `./ci.sh`
 
-This runs:
-- Python reference + vector tests
-- Rust unit tests
+This is the fastest reviewer-oriented check. It runs the Python reference tests when `pytest` is present and then runs the Rust test suites for `vrbdecode-core` and `vrbdecode-zk`.
 
-## 3) Reproduce Journal Submission results (one command)
+## 3. Reproduce the benchmark runs
 
-### 3.1 Quick run (reduced Ks/Ns, 1 repetition)
+### 3.1 Quick reviewer run
+
+Use the reduced configuration first:
 
 - `./scripts/reproduce_ict_express.sh --quick --with-figures`
 
-Outputs:
-- `eval/ict_express.json`, `eval/ict_express_step.csv`, `eval/ict_express_nova.csv`
-- `eval/plots/` (PDF/PNG plots)
+This produces the main benchmark JSON and CSV files and, if `matplotlib` is installed, writes plots under `eval/plots/`.
 
-### 3.2 Paper-grade run (Ks={16,32,64}, Ns={32,64,128,256}, 3 reps)
+### 3.2 Paper-grade run
+
+For the full submission-style run:
 
 - `./scripts/reproduce_ict_express.sh --full --with-ablation --with-figures`
 
-Notes:
-- This can take hours depending on CPU.
-- It is resumable: re-run the same command; `eval/run_ict_express.py` will resume from `eval/*_partial.json`.
+This evaluates `K in {16,32,64}` and `N in {32,64,128,256}` with three repetitions. It can take hours depending on hardware.
 
-## 4) Optional: reproduce wrapped proof + local EVM verification
+The run is resumable. Re-running the same command will continue from the partial outputs under `eval/`.
 
-This requires Foundry (Anvil). The minimal wrapped run uses `N=2` by design.
+## 4. Wrapped proof and local EVM verification
+
+If you want to reproduce the wrapped-proof path and verify it on a local Anvil node:
 
 - `./scripts/reproduce_ict_express.sh --wrap --verify-anvil`
 
-## 5) Consistency check (recommended for reviewers)
+This uses a minimal wrapped setting with `N=2`, which is intentional for the decider workflow.
 
-After running either quick/full:
+## 5. Optional remote verification
+
+Purechain support is included for reviewers who want remote verification receipts in addition to local Anvil runs.
+
+For paper-grade wrapped-proof verification on both Anvil and Purechain:
+
+- `python3 eval/run_ict_express_wrap_baselines.py --verify-anvil --verify-purechain`
+
+This expects `PURECHAIN_PRIVATE_KEY_FILE` to be set in the environment.
+
+## 6. Consistency checks
+
+After a quick run or a full reproduction run, you can validate the deterministic artifact fields with:
 
 - `python3 scripts/check_repro_invariants.py`
 
-This checks “should match exactly” fields (constraint counts, proof sizes, calldata bytes) and ignores timing fields.
+This script checks fields that should match exactly, such as constraint counts, proof sizes, and calldata size, while intentionally ignoring timing fields.
